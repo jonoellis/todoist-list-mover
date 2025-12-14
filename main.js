@@ -27,10 +27,9 @@ const btnRefresh = document.getElementById('btn-refresh');
 // ===== Helpers =====
 
 function getBaseUrl() {
-  const base = window.location.origin + window.location.pathname;
-  // Ensure trailing slash for redirect_uri
-  return base.endsWith('/') ? base : base + '/';
+  return window.location.origin + window.location.pathname.replace(/\/$/, '');
 }
+
 
 function saveToken(token) {
   console.log('[auth] Saving access token (masked).');
