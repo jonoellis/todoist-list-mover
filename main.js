@@ -1,20 +1,14 @@
 // main.js
 
-// ===== CONFIG =====
-// You set this env var in Netlify, not here.
-const TODOIST_CLIENT_ID = 'REPLACE_IN_NETLIFY_BUILD_OR_INLINE_IF_YOU_PREFER';
-
-// Netlify function endpoint (same site)
 const OAUTH_FUNCTION_PATH = '/.netlify/functions/todoist-oauth';
 
-// Scoped state
 let accessToken = null;
 let todayTasks = [];
 let allTasks = [];
 let projectsById = {};
 
-let selectedLeftId = null;   // task or subtask from Today
-let selectedRightId = null;  // destination parent (task only)
+let selectedLeftId = null;
+let selectedRightId = null;
 
 const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
@@ -29,15 +23,12 @@ const moveStatus = document.getElementById('move-status');
 const btnMove = document.getElementById('btn-move');
 const btnRefresh = document.getElementById('btn-refresh');
 
-// ===== HELPERS =====
-
 function getBaseUrl() {
   return window.location.origin + window.location.pathname.replace(/\/$/, '');
 }
 
 function saveToken(token) {
   accessToken = token;
-  // session-only; no persistent storage required, but you can use sessionStorage if desired
 }
 
 function hasToken() {
@@ -69,8 +60,19 @@ async function callTodoist(path, options = {}) {
   return res.json();
 }
 
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function updateMoveButtonState() {
+  btnMove.disabled = !(selectedLeftId && selectedRightId);
+}
+
 function renderLists() {
-  // left
+  // Left column
   todayListEl.innerHTML = '';
   if (!todayTasks.length) {
     todayStatus.textContent = 'No Today tasks found.';
@@ -101,7 +103,7 @@ function renderLists() {
     todayListEl.appendChild(el);
   });
 
-  // right
+  // Right column
   allListEl.innerHTML = '';
   if (!allTasks.length) {
     allStatus.textContent = 'No tasks available.';
@@ -132,17 +134,6 @@ function renderLists() {
   });
 }
 
-function escapeHtml(str) {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function updateMoveButtonState() {
-  btnMove.disabled = !(selectedLeftId && selectedRightId);
-}
-
 async function fetchData() {
   todayStatus.textContent = 'Loading Today tasks...';
   allStatus.textContent = 'Loading tasks...';
@@ -158,23 +149,17 @@ async function fetchData() {
     projectsById[p.id] = p;
   });
 
-  // "Today" tasks: due.date == today or due.datetime today’s date
   const todayIso = new Date().toISOString().slice(0, 10);
   const tasksToday = tasks.filter(t => {
     if (!t.due) return false;
     if (t.due.date === todayIso) return true;
-    // due_datetime may contain time; compare date part
     if (t.due.datetime && t.due.datetime.slice(0, 10) === todayIso) return true;
     return false;
   });
 
-  // include subtasks of those Today tasks:
-  // if a task is a subtask (parent_id) and its ancestor is in "today"
   const todayIds = new Set(tasksToday.map(t => t.id));
   const byId = {};
-  tasks.forEach(t => {
-    byId[t.id] = t;
-  });
+  tasks.forEach(t => { byId[t.id] = t; });
 
   const todayWithSubs = new Map();
   function isDescendantOfToday(t) {
@@ -197,7 +182,6 @@ async function fetchData() {
     String(a.content).localeCompare(String(b.content))
   );
 
-  // all tasks for right side: tasks with no parent (no subtasks)
   allTasks = tasks.filter(t => !t.parent_id).sort((a, b) =>
     String(a.content).localeCompare(String(b.content))
   );
@@ -207,8 +191,6 @@ async function fetchData() {
   updateMoveButtonState();
   renderLists();
 }
-
-// ===== MOVE LOGIC =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -223,8 +205,6 @@ async function performMove() {
       throw new Error('Selection invalid. Refresh and try again.');
     }
 
-    // 1) Move the selected left task (or subtask) into the destination project
-    //    and set its parent_id to the chosen right task.
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
@@ -233,8 +213,6 @@ async function performMove() {
       })
     });
 
-    // 2) Move all of its subtasks (if any) to the same project and under it.
-    //    Find subtasks whose ancestor is left.id.
     const byId = {};
     [...todayTasks, ...allTasks].forEach(t => { byId[t.id] = t; });
 
@@ -271,8 +249,6 @@ async function performMove() {
   }
 }
 
-// ===== OAUTH FLOW =====
-
 function startOAuth() {
   authError.textContent = '';
   const baseUrl = getBaseUrl();
@@ -281,7 +257,7 @@ function startOAuth() {
   sessionStorage.setItem('todoist_oauth_state', state);
 
   const params = new URLSearchParams({
-    client_id: TODOIST_CLIENT_ID,
+    client_id: window.TODOIST_CLIENT_ID,
     scope: 'data:read_write',
     state,
     redirect_uri: baseUrl
@@ -300,9 +276,7 @@ async function handleOAuthRedirect() {
     authError.textContent = 'Authorization declined.';
     return;
   }
-  if (!code) {
-    return;
-  }
+  if (!code) return;
 
   const storedState = sessionStorage.getItem('todoist_oauth_state');
   if (!storedState || storedState !== state) {
@@ -327,7 +301,6 @@ async function handleOAuthRedirect() {
       throw new Error('No access token returned');
     }
     saveToken(data.access_token);
-    // Clean URL
     window.history.replaceState({}, document.title, getBaseUrl());
     showApp();
   } catch (err) {
@@ -339,7 +312,6 @@ async function handleOAuthRedirect() {
 async function showApp() {
   authView.style.display = 'none';
   appView.style.display = 'block';
-
   try {
     await fetchData();
   } catch (err) {
@@ -349,26 +321,16 @@ async function showApp() {
   }
 }
 
-// ===== EVENT WIRING =====
-
-btnAuth.addEventListener('click', () => {
-  startOAuth();
-});
-
+btnAuth.addEventListener('click', () => startOAuth());
 btnRefresh.addEventListener('click', () => {
   fetchData().catch(err => {
     console.error(err);
     moveStatus.textContent = 'Refresh failed.';
   });
 });
+btnMove.addEventListener('click', () => performMove());
 
-btnMove.addEventListener('click', () => {
-  performMove();
-});
-
-// On load
 window.addEventListener('DOMContentLoaded', async () => {
-  // TODO: You may want to inject TODOIST_CLIENT_ID via inline script with Netlify env
   await handleOAuthRedirect();
   if (hasToken()) {
     showApp();
