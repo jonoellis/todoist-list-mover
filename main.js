@@ -229,55 +229,67 @@ async function fetchData() {
 
 // ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT =====
 
+// REPLACE ONLY the performMove function with this:
+
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
-
-  console.log('[move] Starting project reassignment. leftId:', selectedLeftId, 'rightId:', selectedRightId);
 
   const left = todayTasks.find(t => t.id === selectedLeftId);
   const right = allTasks.find(t => t.id === selectedRightId);
 
-  console.log('[move] Left task:', left ? {id: left.id, project_id: left.project_id, content: left.content} : 'NOT FOUND');
-  console.log('[move] Right task:', right ? {id: right.id, project_id: right.project_id, content: right.content} : 'NOT FOUND');
-
-  if (!left || !right) {
-    moveStatus.textContent = 'Selection invalid. Refresh and try again.';
-    return;
-  }
-
-  if (left.id === right.id) {
-    moveStatus.textContent = 'Cannot move task to itself.';
+  if (!left || !right || left.id === right.id) {
+    moveStatus.textContent = 'Invalid selection';
     return;
   }
 
   if (String(left.project_id) === String(right.project_id)) {
-    moveStatus.textContent = 'Already in same project.';
+    moveStatus.textContent = 'Already in same project';
     return;
   }
 
   btnMove.disabled = true;
-  moveStatus.textContent = 'Reassigning project...';
+  moveStatus.textContent = 'Moving to project...';
 
   try {
-    // ONLY reassign project - nothing else
-    console.log('[move] Reassigning project', left.project_id, '→', right.project_id);
-    await callTodoist(`/tasks/${left.id}`, {
+    // Use SYNC API v9 - this is the ONLY way to move tasks between projects
+    const response = await fetch('https://api.todoist.com/sync/v9/sync', {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Request-Id': crypto.randomUUID()
+      },
       body: JSON.stringify({
-        project_id: Number(right.project_id)
+        sync_token: '*',
+        resource_types: '["projects","items"]',
+        commands: [{
+          type: 'item_move',
+          uuid: crypto.randomUUID(),
+          args: {
+            id: parseInt(left.id),
+            project_id: parseInt(right.project_id)
+          }
+        }]
       })
     });
 
-    moveStatus.textContent = '✅ Project reassigned! Refreshing...';
-    console.log('[move] Project reassignment complete');
-    setTimeout(() => fetchData(), 1000);
+    const result = await response.json();
+    console.log('[sync] Result:', result);
+
+    if (!response.ok) {
+      throw new Error(`Sync failed: ${JSON.stringify(result)}`);
+    }
+
+    moveStatus.textContent = '✅ Moved to project! Refreshing...';
+    setTimeout(fetchData, 1000);
   } catch (err) {
-    console.error('[move] ERROR:', err);
+    console.error('[move] Sync error:', err);
     moveStatus.textContent = '❌ ' + err.message;
   } finally {
     btnMove.disabled = false;
   }
 }
+
 
 // ===== OAuth flow (UNCHANGED) =====
 
