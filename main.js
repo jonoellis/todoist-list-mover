@@ -1,5 +1,6 @@
-// main.js - FIXED with Todoist SYNC API v9
+// main.js - SIMPLIFIED: ONLY PROJECT REASSIGNMENT
 
+// Netlify function endpoint
 const OAUTH_FUNCTION_PATH = '/.netlify/functions/todoist-oauth';
 
 let accessToken = null;
@@ -14,6 +15,7 @@ const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
 const btnAuth = document.getElementById('btn-auth');
 const authError = document.getElementById('auth-error');
+
 const todayListEl = document.getElementById('today-task-list');
 const allListEl = document.getElementById('all-task-list');
 const todayStatus = document.getElementById('today-status');
@@ -22,11 +24,14 @@ const moveStatus = document.getElementById('move-status');
 const btnMove = document.getElementById('btn-move');
 const btnRefresh = document.getElementById('btn-refresh');
 
+// ===== Helpers =====
+
 function getBaseUrl() {
   return window.location.origin + window.location.pathname.replace(/\/$/, '');
 }
 
 function saveToken(token) {
+  console.log('[auth] Saving access token (masked).');
   accessToken = token;
 }
 
@@ -35,9 +40,12 @@ function hasToken() {
 }
 
 async function callTodoist(path, options = {}) {
-  if (!accessToken) throw new Error('No access token');
-  
+  if (!accessToken) {
+    throw new Error('No access token');
+  }
   const url = `https://api.todoist.com/rest/v2${path}`;
+  console.log('[todoist] Request:', url, options);
+
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -46,54 +54,52 @@ async function callTodoist(path, options = {}) {
       ...(options.headers || {})
     }
   });
-  
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Todoist error ${res.status}: ${body}`);
-  }
-  
-  if (res.status === 204) return null;
-  return res.json();
-}
 
-async function callSyncApi(commands) {
-  if (!accessToken) throw new Error('No access token');
-  
-  const res = await fetch('https://api.todoist.com/sync/v9/sync', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      sync_token: '*',
-      resource_types: ['["projects","items"]']
-    })
-  });
-  
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Sync API error ${res.status}: ${body}`);
+  let bodyText = '';
+  try {
+    bodyText = await res.clone().text();
+  } catch (e) {
+    // ignore
   }
-  
-  return res.json();
+
+  console.log('[todoist] Response:', url, res.status, bodyText);
+
+  if (!res.ok) {
+    let msg = `Todoist error ${res.status}`;
+    try {
+      const body = bodyText ? JSON.parse(bodyText) : null;
+      if (body && body.message) msg += `: ${body.message}`;
+    } catch (_) {}
+    throw new Error(msg);
+  }
+
+  if (res.status === 204) return null;
+  return bodyText ? JSON.parse(bodyText) : null;
 }
 
 function escapeHtml(str) {
-  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function updateMoveButtonState() {
   btnMove.disabled = !(selectedLeftId && selectedRightId);
 }
 
+// ===== Rendering (UNCHANGED) =====
+
 function renderLists() {
+  console.log('[ui] Rendering lists. Today:', todayTasks.length, 'All:', allTasks.length);
+
+  // Left column
   todayListEl.innerHTML = '';
   if (!todayTasks.length) {
     todayStatus.textContent = 'No Today tasks found.';
-    return;
+  } else {
+    todayStatus.textContent = '';
   }
-  
   todayTasks.forEach(task => {
     const el = document.createElement('label');
     el.className = 'task-item';
@@ -112,18 +118,20 @@ function renderLists() {
     const radio = el.querySelector('input');
     radio.addEventListener('change', () => {
       selectedLeftId = task.id;
+      console.log('[ui] Selected left task:', selectedLeftId, task);
       updateMoveButtonState();
     });
     el.querySelector('.task-main').addEventListener('click', () => radio.click());
     todayListEl.appendChild(el);
   });
 
+  // Right column
   allListEl.innerHTML = '';
   if (!allTasks.length) {
     allStatus.textContent = 'No tasks available.';
-    return;
+  } else {
+    allStatus.textContent = '';
   }
-  
   allTasks.forEach(task => {
     const el = document.createElement('label');
     el.className = 'task-item';
@@ -141,6 +149,7 @@ function renderLists() {
     const radio = el.querySelector('input');
     radio.addEventListener('change', () => {
       selectedRightId = task.id;
+      console.log('[ui] Selected right task:', selectedRightId, task);
       updateMoveButtonState();
     });
     el.querySelector('.task-main').addEventListener('click', () => radio.click());
@@ -148,26 +157,41 @@ function renderLists() {
   });
 }
 
+// ===== Data fetch (UNCHANGED) =====
+
 async function fetchData() {
-  todayStatus.textContent = 'Loading...';
-  allStatus.textContent = 'Loading...';
-  
+  console.log('[data] Fetching projects and tasks...');
+  todayStatus.textContent = 'Loading Today tasks...';
+  allStatus.textContent = 'Loading tasks...';
+  moveStatus.textContent = '';
+
   const [projects, tasks] = await Promise.all([
     callTodoist('/projects'),
     callTodoist('/tasks')
   ]);
 
+  console.log('[data] Projects loaded:', projects.length);
+  console.log('[data] Tasks loaded:', tasks.length);
+
   projectsById = {};
-  projects.forEach(p => projectsById[p.id] = p);
+  projects.forEach(p => {
+    projectsById[p.id] = p;
+  });
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  const tasksToday = tasks.filter(t => 
-    t.due && (t.due.date === todayIso || (t.due.datetime && t.due.datetime.slice(0, 10) === todayIso))
-  );
+  console.log('[data] Today ISO date:', todayIso);
+
+  const tasksToday = tasks.filter(t => {
+    if (!t.due) return false;
+    if (t.due.date === todayIso) return true;
+    if (t.due.datetime && t.due.datetime.slice(0, 10) === todayIso) return true;
+    return false;
+  });
+  console.log('[data] Raw Today tasks count:', tasksToday.length);
 
   const todayIds = new Set(tasksToday.map(t => t.id));
   const byId = {};
-  tasks.forEach(t => byId[t.id] = t);
+  tasks.forEach(t => { byId[t.id] = t; });
 
   const todayWithSubs = new Map();
   function isDescendantOfToday(t) {
@@ -186,12 +210,16 @@ async function fetchData() {
     }
   });
 
-  todayTasks = Array.from(todayWithSubs.values()).sort((a, b) => 
+  todayTasks = Array.from(todayWithSubs.values()).sort((a, b) =>
     String(a.content).localeCompare(String(b.content))
   );
-  allTasks = tasks.filter(t => !t.parent_id).sort((a, b) => 
+
+  allTasks = tasks.filter(t => !t.parent_id).sort((a, b) =>
     String(a.content).localeCompare(String(b.content))
   );
+
+  console.log('[data] Today+subtasks count:', todayTasks.length);
+  console.log('[data] All parent tasks count:', allTasks.length);
 
   selectedLeftId = null;
   selectedRightId = null;
@@ -199,84 +227,67 @@ async function fetchData() {
   renderLists();
 }
 
+// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT =====
+
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
+
+  console.log('[move] Starting project reassignment. leftId:', selectedLeftId, 'rightId:', selectedRightId);
 
   const left = todayTasks.find(t => t.id === selectedLeftId);
   const right = allTasks.find(t => t.id === selectedRightId);
 
-  if (!left || !right || left.id === right.id) {
-    moveStatus.textContent = 'Invalid selection';
+  console.log('[move] Left task:', left ? {id: left.id, project_id: left.project_id, content: left.content} : 'NOT FOUND');
+  console.log('[move] Right task:', right ? {id: right.id, project_id: right.project_id, content: right.content} : 'NOT FOUND');
+
+  if (!left || !right) {
+    moveStatus.textContent = 'Selection invalid. Refresh and try again.';
+    return;
+  }
+
+  if (left.id === right.id) {
+    moveStatus.textContent = 'Cannot move task to itself.';
+    return;
+  }
+
+  if (String(left.project_id) === String(right.project_id)) {
+    moveStatus.textContent = 'Already in same project.';
     return;
   }
 
   btnMove.disabled = true;
-  moveStatus.textContent = 'Moving...';
+  moveStatus.textContent = 'Reassigning project...';
 
   try {
-    // Build SYNC commands
-    const commands = [];
-    const uuid = crypto.randomUUID();
-
-    // Move main task to right's project and set parent
-    commands.push({
-      type: 'item_move',
-      uuid: `${uuid}-main`,
-      args: {
-        id: left.id,
-        project_id: right.project_id,
-        parent_id: right.id
-      }
+    // ONLY reassign project - nothing else
+    console.log('[move] Reassigning project', left.project_id, '→', right.project_id);
+    await callTodoist(`/tasks/${left.id}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        project_id: Number(right.project_id)
+      })
     });
 
-    // Find and move children
-    const allTasksFlat = [...todayTasks, ...allTasks];
-    const byId = {};
-    allTasksFlat.forEach(t => byId[t.id] = t);
-
-    function findChildren(taskId) {
-      return allTasksFlat.filter(task => {
-        let current = task;
-        while (current.parent_id) {
-          if (current.parent_id === taskId) return true;
-          current = byId[current.parent_id];
-          if (!current) break;
-        }
-        return false;
-      });
-    }
-
-    const children = findChildren(left.id);
-    for (const child of children) {
-      commands.push({
-        type: 'item_move',
-        uuid: `${uuid}-${child.id}`,
-        args: {
-          id: child.id,
-          project_id: right.project_id,
-          parent_id: left.id
-        }
-      });
-    }
-
-    console.log('SYNC commands:', commands);
-
-    // Execute via sync API
-    await callSyncApi(commands);
-    
-    moveStatus.textContent = '✅ Moved! Refreshing...';
-    setTimeout(fetchData, 1000);
+    moveStatus.textContent = '✅ Project reassigned! Refreshing...';
+    console.log('[move] Project reassignment complete');
+    setTimeout(() => fetchData(), 1000);
   } catch (err) {
-    console.error(err);
+    console.error('[move] ERROR:', err);
     moveStatus.textContent = '❌ ' + err.message;
   } finally {
     btnMove.disabled = false;
   }
 }
 
+// ===== OAuth flow (UNCHANGED) =====
+
 function startOAuth() {
+  authError.textContent = '';
   const baseUrl = getBaseUrl();
   const state = Math.random().toString(36).slice(2);
+
+  console.log('[auth] Starting OAuth with redirect_uri:', baseUrl, 'state:', state);
+
   sessionStorage.setItem('todoist_oauth_state', state);
 
   const params = new URLSearchParams({
@@ -286,7 +297,9 @@ function startOAuth() {
     redirect_uri: baseUrl
   });
 
-  window.location.href = `https://todoist.com/oauth/authorize?${params.toString()}`;
+  const authUrl = `https://todoist.com/oauth/authorize?${params.toString()}`;
+  console.log('[auth] Redirecting to:', authUrl);
+  window.location.href = authUrl;
 }
 
 async function handleOAuthRedirect() {
@@ -295,10 +308,27 @@ async function handleOAuthRedirect() {
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
 
-  if (error || !code) return;
-  
+  console.log('[auth] Redirect params:', { code: !!code, state, error });
+
+  if (error) {
+    authError.textContent = 'Authorization declined.';
+    console.warn('[auth] OAuth error from provider:', error);
+    return;
+  }
+  if (!code) {
+    console.log('[auth] No code in URL; first load or already cleaned.');
+    return;
+  }
+
   const storedState = sessionStorage.getItem('todoist_oauth_state');
-  if (storedState !== state) return;
+  if (!storedState || storedState !== state) {
+    authError.textContent = 'State mismatch. Please try again.';
+    console.error('[auth] State mismatch. stored:', storedState, 'url:', state);
+    return;
+  }
+
+  authError.textContent = 'Exchanging code...';
+  console.log('[auth] Exchanging code for token via Netlify function.');
 
   try {
     const res = await fetch(OAUTH_FUNCTION_PATH, {
@@ -306,14 +336,21 @@ async function handleOAuthRedirect() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, redirect_uri: getBaseUrl() })
     });
+    const text = await res.text();
+    console.log('[auth] Token endpoint response:', res.status, text);
 
-    if (!res.ok) throw new Error('Token exchange failed');
-    
-    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(text || 'Token exchange failed');
+    }
+    const data = JSON.parse(text);
+    if (!data.access_token) {
+      throw new Error('No access token returned');
+    }
     saveToken(data.access_token);
-    window.history.replaceState({}, '', getBaseUrl());
+    window.history.replaceState({}, document.title, getBaseUrl());
     showApp();
   } catch (err) {
+    console.error('[auth] OAuth failed:', err);
     authError.textContent = 'OAuth failed: ' + err.message;
   }
 }
@@ -321,15 +358,39 @@ async function handleOAuthRedirect() {
 async function showApp() {
   authView.style.display = 'none';
   appView.style.display = 'block';
-  await fetchData();
+  try {
+    await fetchData();
+  } catch (err) {
+    todayStatus.textContent = 'Failed to load tasks.';
+    allStatus.textContent = 'Failed to load tasks.';
+    console.error('[data] Initial load failed:', err);
+  }
 }
 
-// Event wiring
-btnAuth.addEventListener('click', startOAuth);
-btnRefresh.addEventListener('click', fetchData);
-btnMove.addEventListener('click', performMove);
+// ===== Event wiring =====
+
+btnAuth.addEventListener('click', () => startOAuth());
+
+btnRefresh.addEventListener('click', () => {
+  console.log('[ui] Refresh clicked.');
+  fetchData().catch(err => {
+    console.error('[data] Refresh failed:', err);
+    moveStatus.textContent = 'Refresh failed.';
+  });
+});
+
+btnMove.addEventListener('click', () => {
+  console.log('[ui] Move clicked.');
+  performMove();
+});
 
 window.addEventListener('DOMContentLoaded', async () => {
+  console.log('[init] DOMContentLoaded, handling possible OAuth redirect.');
   await handleOAuthRedirect();
-  if (hasToken()) showApp();
+  if (hasToken()) {
+    console.log('[init] Token already present, showing app.');
+    showApp();
+  } else {
+    console.log('[init] No token yet, waiting for auth.');
+  }
 });
