@@ -229,7 +229,7 @@ async function fetchData() {
   renderLists();
 }
 
-// ===== Move logic (two-step updates) =====
+// ===== Move logic (two-step updates with extra guards) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -255,18 +255,28 @@ async function performMove() {
     return;
   }
 
+  if (!projectsById[right.project_id]) {
+    moveStatus.textContent = 'Destination project no longer exists.';
+    console.error('[move] Invalid project_id for right task:', right.project_id);
+    return;
+  }
+
   btnMove.disabled = true;
   moveStatus.textContent = 'Moving...';
 
   try {
-    // Step 1: Move left task to the right task's project
-    console.log('[move] Step 1: move left to project', right.project_id);
-    await callTodoist(`/tasks/${left.id}`, {
-      method: 'POST',
-      body: JSON.stringify({
-        project_id: right.project_id
-      })
-    });
+    // Step 1: Move left task to the right task's project (if different)
+    if (left.project_id !== right.project_id) {
+      console.log('[move] Step 1: move left to project', right.project_id, 'from', left.project_id);
+      await callTodoist(`/tasks/${left.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: Number(right.project_id)
+        })
+      });
+    } else {
+      console.log('[move] Step 1: skipped, left already in target project');
+    }
 
     // Step 2: Make left task a subtask of right
     console.log('[move] Step 2: set left.parent_id to', right.id);
@@ -277,7 +287,7 @@ async function performMove() {
       })
     });
 
-    // Prepare task map (latest we have)
+    // Rebuild map from latest known tasks
     const byId = {};
     [...todayTasks, ...allTasks].forEach(t => { byId[t.id] = t; });
 
@@ -292,21 +302,27 @@ async function performMove() {
     }
 
     const childrenToMove = Object.values(byId).filter(t => isDescendantOf(t, left.id));
-
-    console.log('[move] Children to move under left:', childrenToMove.map(c => c.id));
+    console.log('[move] Children to move under left:', childrenToMove.map(c => ({
+      id: c.id,
+      project_id: c.project_id
+    })));
 
     for (const child of childrenToMove) {
-      console.log('[move] Moving child', child.id, 'to project', right.project_id);
-      // Step 1 for child: move into project
-      await callTodoist(`/tasks/${child.id}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          project_id: right.project_id
-        })
-      });
+      // Step 1 for child: move into project if needed
+      if (child.project_id !== right.project_id) {
+        console.log('[move] Moving child', child.id, 'to project', right.project_id, 'from', child.project_id);
+        await callTodoist(`/tasks/${child.id}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            project_id: Number(right.project_id)
+          })
+        });
+      } else {
+        console.log('[move] Child', child.id, 'already in target project, skipping project move');
+      }
 
-      console.log('[move] Setting child', child.id, 'parent_id to', left.id);
       // Step 2 for child: set parent to left
+      console.log('[move] Setting child', child.id, 'parent_id to', left.id);
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
@@ -434,11 +450,4 @@ btnMove.addEventListener('click', () => {
 
 window.addEventListener('DOMContentLoaded', async () => {
   console.log('[init] DOMContentLoaded, handling possible OAuth redirect.');
-  await handleOAuthRedirect();
-  if (hasToken()) {
-    console.log('[init] Token already present, showing app.');
-    showApp();
-  } else {
-    console.log('[init] No token yet, waiting for auth.');
-  }
-});
+  await handle
