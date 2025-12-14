@@ -15,11 +15,7 @@
       --danger: #ff4b5c;
       --font: "Share Tech Mono", system-ui, monospace;
     }
-
-    * {
-      box-sizing: border-box;
-    }
-
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
@@ -34,7 +30,6 @@
       justify-content: center;
       padding: 24px;
     }
-
     .glitch-title {
       font-size: 2rem;
       text-transform: uppercase;
@@ -43,7 +38,6 @@
       margin-bottom: 24px;
       text-align: center;
     }
-
     .glitch-title::before,
     .glitch-title::after {
       content: attr(data-text);
@@ -54,55 +48,29 @@
       overflow: hidden;
       clip: rect(0, 900px, 0, 0);
     }
-
     .glitch-title::before {
       left: 2px;
       text-shadow: -2px 0 var(--accent-cyan);
       animation: glitch-anim 2s infinite linear alternate-reverse;
     }
-
     .glitch-title::after {
       left: -2px;
       text-shadow: -2px 0 var(--accent-pink);
       animation: glitch-anim 1.8s infinite linear alternate-reverse;
     }
-
     @keyframes glitch-anim {
-      0% {
-        clip: rect(0, 9999px, 0, 0);
-      }
-      10% {
-        clip: rect(10px, 9999px, 40px, 0);
-      }
-      20% {
-        clip: rect(40px, 9999px, 80px, 0);
-      }
-      30% {
-        clip: rect(20px, 9999px, 60px, 0);
-      }
-      40% {
-        clip: rect(60px, 9999px, 100px, 0);
-      }
-      50% {
-        clip: rect(30px, 9999px, 90px, 0);
-      }
-      60% {
-        clip: rect(0, 9999px, 50px, 0);
-      }
-      70% {
-        clip: rect(50px, 9999px, 120px, 0);
-      }
-      80% {
-        clip: rect(10px, 9999px, 70px, 0);
-      }
-      90% {
-        clip: rect(0, 9999px, 40px, 0);
-      }
-      100% {
-        clip: rect(20px, 9999px, 100px, 0);
-      }
+      0% { clip: rect(0, 9999px, 0, 0); }
+      10% { clip: rect(10px, 9999px, 40px, 0); }
+      20% { clip: rect(40px, 9999px, 80px, 0); }
+      30% { clip: rect(20px, 9999px, 60px, 0); }
+      40% { clip: rect(60px, 9999px, 100px, 0); }
+      50% { clip: rect(30px, 9999px, 90px, 0); }
+      60% { clip: rect(0, 9999px, 50px, 0); }
+      70% { clip: rect(50px, 9999px, 120px, 0); }
+      80% { clip: rect(10px, 9999px, 70px, 0); }
+      90% { clip: rect(0, 9999px, 40px, 0); }
+      100% { clip: rect(20px, 9999px, 100px, 0); }
     }
-
     .card {
       width: 100%;
       max-width: 1100px;
@@ -116,18 +84,8 @@
       border: 1px solid rgba(50, 255, 245, 0.3);
       backdrop-filter: blur(10px);
     }
-
-    .row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-
-    .col {
-      flex: 1 1 320px;
-      min-width: 0;
-    }
-
+    .row { display: flex; flex-wrap: wrap; gap: 16px; }
+    .col { flex: 1 1 320px; min-width: 0; }
     .panel {
       background: radial-gradient(circle at top, #151a3a 0, #050814 60%);
       border-radius: 10px;
@@ -139,7 +97,6 @@
       position: relative;
       overflow: hidden;
     }
-
     .panel::before {
       content: "";
       position: absolute;
@@ -154,26 +111,22 @@
       opacity: 0.35;
       mix-blend-mode: soft-light;
     }
-
     .panel-header {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
       margin-bottom: 10px;
     }
-
     .panel-title {
       font-size: 0.95rem;
       text-transform: uppercase;
       letter-spacing: 0.15em;
       color: var(--accent-cyan);
     }
-
     .panel-subtitle {
       font-size: 0.75rem;
       color: var(--text-muted);
     }
-
     .btn {
       display: inline-flex;
       align-items: center;
@@ -194,14 +147,12 @@
         0 0 16px rgba(50, 255, 245, 0.2);
       transition: transform 0.08s ease-out, box-shadow 0.08s ease-out, filter 0.08s;
     }
-
     .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
       box-shadow: none;
       filter: grayscale(0.3);
     }
-
     .btn:hover:not(:disabled) {
       transform: translateY(-1px);
       box-shadow:
@@ -209,7 +160,6 @@
         0 0 28px rgba(50, 255, 245, 0.35);
       filter: saturate(1.2);
     }
-
     .btn-outline {
       background: transparent;
       border-color: var(--accent-cyan);
@@ -217,18 +167,13 @@
         0 0 10px rgba(50, 255, 245, 0.5),
         0 0 18px rgba(255, 47, 208, 0.2);
     }
-
     .status {
       font-size: 0.8rem;
       color: var(--text-muted);
       margin-top: 6px;
       min-height: 1em;
     }
-
-    .error {
-      color: var(--danger);
-    }
-
+    .error { color: var(--danger); }
     .task-list {
       margin: 4px 0 0;
       max-height: 460px;
@@ -236,7 +181,6 @@
       padding-right: 4px;
       scrollbar-width: thin;
     }
-
     .task-item {
       display: flex;
       align-items: flex-start;
@@ -249,32 +193,23 @@
       box-shadow: 0 0 8px rgba(50, 255, 245, 0.4);
       position: relative;
     }
-
     .task-item[data-subtask="true"] {
       margin-left: 18px;
       border-style: dashed;
       opacity: 0.9;
     }
-
     .task-item input[type="radio"] {
       margin-top: 3px;
       accent-color: var(--accent-pink);
       cursor: pointer;
     }
-
-    .task-main {
-      flex: 1;
-      min-width: 0;
-      cursor: pointer;
-    }
-
+    .task-main { flex: 1; min-width: 0; cursor: pointer; }
     .task-title {
       font-size: 0.9rem;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-
     .task-project {
       font-size: 0.75rem;
       color: var(--accent-cyan);
@@ -282,13 +217,11 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
-
     .task-meta {
       font-size: 0.7rem;
       color: var(--text-muted);
       margin-top: 2px;
     }
-
     .badge {
       display: inline-block;
       padding: 2px 6px;
@@ -298,7 +231,6 @@
       margin-left: 4px;
       color: var(--accent-pink);
     }
-
     .controls {
       display: flex;
       align-items: center;
@@ -307,21 +239,15 @@
       gap: 10px;
       flex-wrap: wrap;
     }
-
     .controls-left {
       display: flex;
       align-items: center;
       gap: 10px;
       flex-wrap: wrap;
     }
-
     @media (max-width: 768px) {
-      .glitch-title {
-        font-size: 1.5rem;
-      }
-      .card {
-        padding: 18px 16px 22px;
-      }
+      .glitch-title { font-size: 1.5rem; }
+      .card { padding: 18px 16px 22px; }
     }
   </style>
 </head>
@@ -377,6 +303,10 @@
     </div>
   </div>
 
+  <!-- Client ID is safe to expose; secret stays on server -->
+  <script>
+    window.TODOIST_CLIENT_ID = "YOUR_TODOIST_CLIENT_ID_HERE";
+  </script>
   <script src="main.js"></script>
 </body>
 </html>
