@@ -242,22 +242,17 @@ async function performMove() {
     return;
   }
 
-  if (String(left.project_id) === String(right.project_id)) {
-    moveStatus.textContent = 'Already in same project';
-    return;
-  }
-
   btnMove.disabled = true;
-  moveStatus.textContent = 'Moving to project...';
+  moveStatus.textContent = 'Step 1: Moving to project...';
 
   try {
-    // SYNC API v9 - FIXED CORS headers
-    const response = await fetch('https://api.todoist.com/sync/v9/sync', {
+    // STEP 1: Move left task to right's project using SYNC API
+    console.log('[move] STEP 1: Moving task to project', right.project_id);
+    await fetch('https://api.todoist.com/sync/v9/sync', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
-        // NO X-Request-Id - this was causing CORS
       },
       body: JSON.stringify({
         sync_token: '*',
@@ -273,22 +268,73 @@ async function performMove() {
       })
     });
 
-    const result = await response.json();
-    console.log('[sync] Result:', result);
+    moveStatus.textContent = 'Step 2: Making subtask...';
 
-    if (!response.ok) {
-      throw new Error(`Sync failed: ${JSON.stringify(result)}`);
+    // STEP 2: Set parent_id using REST API (now safe since same project)
+    console.log('[move] STEP 2: Setting parent_id to', right.id);
+    await callTodoist(`/tasks/${left.id}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        parent_id: right.id
+      })
+    });
+
+    // Find and move children (if any)
+    const allTasksFlat = [...todayTasks, ...allTasks];
+    const byId = {};
+    allTasksFlat.forEach(t => byId[t.id] = t);
+
+    const children = allTasksFlat.filter(task => {
+      let current = task;
+      while (current.parent_id) {
+        if (current.parent_id === left.id) return true;
+        current = byId[current.parent_id];
+        if (!current) break;
+      }
+      return false;
+    });
+
+    for (const child of children) {
+      // Move child to same project
+      await fetch('https://api.todoist.com/sync/v9/sync', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sync_token: '*',
+          resource_types: '["projects","items"]',
+          commands: [{
+            type: 'item_move',
+            uuid: crypto.randomUUID(),
+            args: {
+              id: parseInt(child.id),
+              project_id: parseInt(right.project_id)
+            }
+          }]
+        })
+      });
+
+      // Set child parent to left task
+      await callTodoist(`/tasks/${child.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          parent_id: left.id
+        })
+      });
     }
 
-    moveStatus.textContent = '✅ Moved to project! Refreshing...';
-    setTimeout(fetchData, 1000);
+    moveStatus.textContent = '✅ Moved as subtask! Refreshing...';
+    setTimeout(fetchData, 1500);
   } catch (err) {
-    console.error('[move] Sync error:', err);
+    console.error('[move] Error:', err);
     moveStatus.textContent = '❌ ' + err.message;
   } finally {
     btnMove.disabled = false;
   }
 }
+
 
 
 
