@@ -1,5 +1,6 @@
 // main.js
 
+// Netlify function endpoint
 const OAUTH_FUNCTION_PATH = '/.netlify/functions/todoist-oauth';
 
 let accessToken = null;
@@ -23,11 +24,16 @@ const moveStatus = document.getElementById('move-status');
 const btnMove = document.getElementById('btn-move');
 const btnRefresh = document.getElementById('btn-refresh');
 
+// ===== Helpers =====
+
 function getBaseUrl() {
-  return window.location.origin + window.location.pathname.replace(/\/$/, '');
+  const base = window.location.origin + window.location.pathname;
+  // Ensure trailing slash for redirect_uri
+  return base.endsWith('/') ? base : base + '/';
 }
 
 function saveToken(token) {
+  console.log('[auth] Saving access token (masked).');
   accessToken = token;
 }
 
@@ -40,6 +46,8 @@ async function callTodoist(path, options = {}) {
     throw new Error('No access token');
   }
   const url = `https://api.todoist.com/rest/v2${path}`;
+  console.log('[todoist] Request:', url, options);
+
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -48,16 +56,27 @@ async function callTodoist(path, options = {}) {
       ...(options.headers || {})
     }
   });
+
+  let bodyText = '';
+  try {
+    bodyText = await res.clone().text();
+  } catch (e) {
+    // ignore
+  }
+
+  console.log('[todoist] Response:', url, res.status, bodyText);
+
   if (!res.ok) {
     let msg = `Todoist error ${res.status}`;
     try {
-      const body = await res.json();
+      const body = bodyText ? JSON.parse(bodyText) : null;
       if (body && body.message) msg += `: ${body.message}`;
     } catch (_) {}
     throw new Error(msg);
   }
+
   if (res.status === 204) return null;
-  return res.json();
+  return bodyText ? JSON.parse(bodyText) : null;
 }
 
 function escapeHtml(str) {
@@ -71,7 +90,11 @@ function updateMoveButtonState() {
   btnMove.disabled = !(selectedLeftId && selectedRightId);
 }
 
+// ===== Rendering =====
+
 function renderLists() {
+  console.log('[ui] Rendering lists. Today:', todayTasks.length, 'All:', allTasks.length);
+
   // Left column
   todayListEl.innerHTML = '';
   if (!todayTasks.length) {
@@ -97,6 +120,7 @@ function renderLists() {
     const radio = el.querySelector('input');
     radio.addEventListener('change', () => {
       selectedLeftId = task.id;
+      console.log('[ui] Selected left task:', selectedLeftId, task);
       updateMoveButtonState();
     });
     el.querySelector('.task-main').addEventListener('click', () => radio.click());
@@ -127,6 +151,7 @@ function renderLists() {
     const radio = el.querySelector('input');
     radio.addEventListener('change', () => {
       selectedRightId = task.id;
+      console.log('[ui] Selected right task:', selectedRightId, task);
       updateMoveButtonState();
     });
     el.querySelector('.task-main').addEventListener('click', () => radio.click());
@@ -134,7 +159,10 @@ function renderLists() {
   });
 }
 
+// ===== Data fetch =====
+
 async function fetchData() {
+  console.log('[data] Fetching projects and tasks...');
   todayStatus.textContent = 'Loading Today tasks...';
   allStatus.textContent = 'Loading tasks...';
   moveStatus.textContent = '';
@@ -144,18 +172,24 @@ async function fetchData() {
     callTodoist('/tasks')
   ]);
 
+  console.log('[data] Projects loaded:', projects.length);
+  console.log('[data] Tasks loaded:', tasks.length);
+
   projectsById = {};
   projects.forEach(p => {
     projectsById[p.id] = p;
   });
 
   const todayIso = new Date().toISOString().slice(0, 10);
+  console.log('[data] Today ISO date:', todayIso);
+
   const tasksToday = tasks.filter(t => {
     if (!t.due) return false;
     if (t.due.date === todayIso) return true;
     if (t.due.datetime && t.due.datetime.slice(0, 10) === todayIso) return true;
     return false;
   });
+  console.log('[data] Raw Today tasks count:', tasksToday.length);
 
   const todayIds = new Set(tasksToday.map(t => t.id));
   const byId = {};
@@ -186,33 +220,64 @@ async function fetchData() {
     String(a.content).localeCompare(String(b.content))
   );
 
+  console.log('[data] Today+subtasks count:', todayTasks.length);
+  console.log('[data] All parent tasks count:', allTasks.length);
+
   selectedLeftId = null;
   selectedRightId = null;
   updateMoveButtonState();
   renderLists();
 }
 
+// ===== Move logic (two-step updates) =====
+
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
+
+  console.log('[move] Starting move. leftId:', selectedLeftId, 'rightId:', selectedRightId);
+
+  const left = todayTasks.find(t => t.id === selectedLeftId) ||
+               allTasks.find(t => t.id === selectedLeftId);
+  const right = allTasks.find(t => t.id === selectedRightId);
+
+  console.log('[move] Left task object:', left);
+  console.log('[move] Right task object:', right);
+
+  if (!left || !right) {
+    moveStatus.textContent = 'Selection invalid. Refresh and try again.';
+    console.error('[move] Invalid selection: left or right not found.');
+    return;
+  }
+
+  if (left.id === right.id) {
+    moveStatus.textContent = 'Cannot make a task a subtask of itself.';
+    console.warn('[move] Attempted to make a task its own parent.');
+    return;
+  }
 
   btnMove.disabled = true;
   moveStatus.textContent = 'Moving...';
 
   try {
-    const left = todayTasks.find(t => t.id === selectedLeftId);
-    const right = allTasks.find(t => t.id === selectedRightId);
-    if (!left || !right) {
-      throw new Error('Selection invalid. Refresh and try again.');
-    }
-
+    // Step 1: Move left task to the right task's project
+    console.log('[move] Step 1: move left to project', right.project_id);
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
-        project_id: right.project_id,
+        project_id: right.project_id
+      })
+    });
+
+    // Step 2: Make left task a subtask of right
+    console.log('[move] Step 2: set left.parent_id to', right.id);
+    await callTodoist(`/tasks/${left.id}`, {
+      method: 'POST',
+      body: JSON.stringify({
         parent_id: right.id
       })
     });
 
+    // Prepare task map (latest we have)
     const byId = {};
     [...todayTasks, ...allTasks].forEach(t => { byId[t.id] = t; });
 
@@ -228,31 +293,48 @@ async function performMove() {
 
     const childrenToMove = Object.values(byId).filter(t => isDescendantOf(t, left.id));
 
+    console.log('[move] Children to move under left:', childrenToMove.map(c => c.id));
+
     for (const child of childrenToMove) {
+      console.log('[move] Moving child', child.id, 'to project', right.project_id);
+      // Step 1 for child: move into project
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
-          project_id: right.project_id,
+          project_id: right.project_id
+        })
+      });
+
+      console.log('[move] Setting child', child.id, 'parent_id to', left.id);
+      // Step 2 for child: set parent to left
+      await callTodoist(`/tasks/${child.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
           parent_id: left.id
         })
       });
     }
 
     moveStatus.textContent = 'Moved. Refreshing...';
+    console.log('[move] Move complete, refreshing data...');
     await fetchData();
     moveStatus.textContent = 'Move complete.';
   } catch (err) {
-    console.error(err);
+    console.error('[move] Move failed:', err);
     moveStatus.textContent = 'Move failed: ' + err.message;
   } finally {
     updateMoveButtonState();
   }
 }
 
+// ===== OAuth flow =====
+
 function startOAuth() {
   authError.textContent = '';
   const baseUrl = getBaseUrl();
   const state = Math.random().toString(36).slice(2);
+
+  console.log('[auth] Starting OAuth with redirect_uri:', baseUrl, 'state:', state);
 
   sessionStorage.setItem('todoist_oauth_state', state);
 
@@ -263,7 +345,9 @@ function startOAuth() {
     redirect_uri: baseUrl
   });
 
-  window.location.href = `https://todoist.com/oauth/authorize?${params.toString()}`;
+  const authUrl = `https://todoist.com/oauth/authorize?${params.toString()}`;
+  console.log('[auth] Redirecting to:', authUrl);
+  window.location.href = authUrl;
 }
 
 async function handleOAuthRedirect() {
@@ -272,19 +356,27 @@ async function handleOAuthRedirect() {
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
 
+  console.log('[auth] Redirect params:', { code: !!code, state, error });
+
   if (error) {
     authError.textContent = 'Authorization declined.';
+    console.warn('[auth] OAuth error from provider:', error);
     return;
   }
-  if (!code) return;
+  if (!code) {
+    console.log('[auth] No code in URL; first load or already cleaned.');
+    return;
+  }
 
   const storedState = sessionStorage.getItem('todoist_oauth_state');
   if (!storedState || storedState !== state) {
     authError.textContent = 'State mismatch. Please try again.';
+    console.error('[auth] State mismatch. stored:', storedState, 'url:', state);
     return;
   }
 
   authError.textContent = 'Exchanging code...';
+  console.log('[auth] Exchanging code for token via Netlify function.');
 
   try {
     const res = await fetch(OAUTH_FUNCTION_PATH, {
@@ -292,11 +384,13 @@ async function handleOAuthRedirect() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, redirect_uri: getBaseUrl() })
     });
+    const text = await res.text();
+    console.log('[auth] Token endpoint response:', res.status, text);
+
     if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(txt || 'Token exchange failed');
+      throw new Error(text || 'Token exchange failed');
     }
-    const data = await res.json();
+    const data = JSON.parse(text);
     if (!data.access_token) {
       throw new Error('No access token returned');
     }
@@ -304,7 +398,7 @@ async function handleOAuthRedirect() {
     window.history.replaceState({}, document.title, getBaseUrl());
     showApp();
   } catch (err) {
-    console.error(err);
+    console.error('[auth] OAuth failed:', err);
     authError.textContent = 'OAuth failed: ' + err.message;
   }
 }
@@ -317,22 +411,34 @@ async function showApp() {
   } catch (err) {
     todayStatus.textContent = 'Failed to load tasks.';
     allStatus.textContent = 'Failed to load tasks.';
-    console.error(err);
+    console.error('[data] Initial load failed:', err);
   }
 }
 
+// ===== Event wiring =====
+
 btnAuth.addEventListener('click', () => startOAuth());
+
 btnRefresh.addEventListener('click', () => {
+  console.log('[ui] Refresh clicked.');
   fetchData().catch(err => {
-    console.error(err);
+    console.error('[data] Refresh failed:', err);
     moveStatus.textContent = 'Refresh failed.';
   });
 });
-btnMove.addEventListener('click', () => performMove());
+
+btnMove.addEventListener('click', () => {
+  console.log('[ui] Move clicked.');
+  performMove();
+});
 
 window.addEventListener('DOMContentLoaded', async () => {
+  console.log('[init] DOMContentLoaded, handling possible OAuth redirect.');
   await handleOAuthRedirect();
   if (hasToken()) {
+    console.log('[init] Token already present, showing app.');
     showApp();
+  } else {
+    console.log('[init] No token yet, waiting for auth.');
   }
 });
