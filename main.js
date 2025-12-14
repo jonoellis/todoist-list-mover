@@ -27,9 +27,7 @@ const btnRefresh = document.getElementById('btn-refresh');
 // ===== Helpers =====
 
 function getBaseUrl() {
-  const base = window.location.origin + window.location.pathname;
-  // Ensure trailing slash for redirect_uri
-  return base.endsWith('/') ? base : base + '/';
+  return window.location.origin + window.location.pathname.replace(/\/$/, '');
 }
 
 function saveToken(token) {
@@ -229,47 +227,56 @@ async function fetchData() {
   renderLists();
 }
 
-// ===== Move logic (two-step updates) =====
+// ===== Move logic (FIXED: numeric project_id + skip same project) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
 
   console.log('[move] Starting move. leftId:', selectedLeftId, 'rightId:', selectedRightId);
 
-  const left = todayTasks.find(t => t.id === selectedLeftId) ||
-               allTasks.find(t => t.id === selectedLeftId);
+  const left = todayTasks.find(t => t.id === selectedLeftId);
   const right = allTasks.find(t => t.id === selectedRightId);
 
-  console.log('[move] Left task object:', left);
-  console.log('[move] Right task object:', right);
+  console.log('[move] Left task:', left ? {id: left.id, project_id: left.project_id, content: left.content} : 'NOT FOUND');
+  console.log('[move] Right task:', right ? {id: right.id, project_id: right.project_id, content: right.content} : 'NOT FOUND');
 
   if (!left || !right) {
     moveStatus.textContent = 'Selection invalid. Refresh and try again.';
-    console.error('[move] Invalid selection: left or right not found.');
     return;
   }
 
   if (left.id === right.id) {
     moveStatus.textContent = 'Cannot make a task a subtask of itself.';
-    console.warn('[move] Attempted to make a task its own parent.');
     return;
   }
+
+  if (!projectsById[right.project_id]) {
+    moveStatus.textContent = 'Destination project not found.';
+    console.error('[move] Project not found:', right.project_id);
+    return;
+  }
+
+  console.log('[move] Target project:', projectsById[right.project_id].name);
 
   btnMove.disabled = true;
   moveStatus.textContent = 'Moving...';
 
   try {
-    // Step 1: Move left task to the right task's project
-    console.log('[move] Step 1: move left to project', right.project_id);
-    await callTodoist(`/tasks/${left.id}`, {
-      method: 'POST',
-      body: JSON.stringify({
-        project_id: right.project_id
-      })
-    });
+    // STEP 1: Move left task to right's project (ONLY if different, with Number conversion)
+    if (String(left.project_id) !== String(right.project_id)) {
+      console.log('[move] STEP 1: Moving from project', left.project_id, '→', right.project_id);
+      await callTodoist(`/tasks/${left.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: Number(right.project_id)
+        })
+      });
+    } else {
+      console.log('[move] STEP 1: SKIPPED - already in target project', right.project_id);
+    }
 
-    // Step 2: Make left task a subtask of right
-    console.log('[move] Step 2: set left.parent_id to', right.id);
+    // STEP 2: Set parent_id to right task
+    console.log('[move] STEP 2: Setting parent_id to', right.id);
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
@@ -277,36 +284,44 @@ async function performMove() {
       })
     });
 
-    // Prepare task map (latest we have)
+    // Find and move children
+    const allTasksFlat = [...todayTasks, ...allTasks];
     const byId = {};
-    [...todayTasks, ...allTasks].forEach(t => { byId[t.id] = t; });
+    allTasksFlat.forEach(t => { byId[t.id] = t; });
 
-    function isDescendantOf(task, ancestorId) {
-      let current = task;
-      while (current.parent_id) {
-        if (current.parent_id === ancestorId) return true;
-        current = byId[current.parent_id];
-        if (!current) break;
+    function findChildren(taskId) {
+      const children = [];
+      for (const task of allTasksFlat) {
+        let current = task;
+        while (current.parent_id) {
+          if (current.parent_id === taskId) {
+            children.push(current);
+            break;
+          }
+          current = byId[current.parent_id];
+          if (!current) break;
+        }
       }
-      return false;
+      return children;
     }
 
-    const childrenToMove = Object.values(byId).filter(t => isDescendantOf(t, left.id));
-
-    console.log('[move] Children to move under left:', childrenToMove.map(c => c.id));
+    const childrenToMove = findChildren(left.id);
+    console.log('[move] Found', childrenToMove.length, 'children to move:', childrenToMove.map(c => c.id));
 
     for (const child of childrenToMove) {
-      console.log('[move] Moving child', child.id, 'to project', right.project_id);
-      // Step 1 for child: move into project
-      await callTodoist(`/tasks/${child.id}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          project_id: right.project_id
-        })
-      });
+      // Move child to project (if needed)
+      if (String(child.project_id) !== String(right.project_id)) {
+        console.log('[move] Child project move:', child.id, '→', right.project_id);
+        await callTodoist(`/tasks/${child.id}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            project_id: Number(right.project_id)
+          })
+        });
+      }
 
-      console.log('[move] Setting child', child.id, 'parent_id to', left.id);
-      // Step 2 for child: set parent to left
+      // Set child parent to left task
+      console.log('[move] Child parent set:', child.id, '→', left.id);
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
@@ -315,15 +330,13 @@ async function performMove() {
       });
     }
 
-    moveStatus.textContent = 'Moved. Refreshing...';
-    console.log('[move] Move complete, refreshing data...');
-    await fetchData();
-    moveStatus.textContent = 'Move complete.';
+    moveStatus.textContent = '✅ Moved! Refreshing...';
+    setTimeout(() => fetchData(), 1000);
   } catch (err) {
-    console.error('[move] Move failed:', err);
-    moveStatus.textContent = 'Move failed: ' + err.message;
+    console.error('[move] ERROR:', err);
+    moveStatus.textContent = '❌ ' + err.message;
   } finally {
-    updateMoveButtonState();
+    btnMove.disabled = false;
   }
 }
 
@@ -333,9 +346,6 @@ function startOAuth() {
   authError.textContent = '';
   const baseUrl = getBaseUrl();
   const state = Math.random().toString(36).slice(2);
-
-  console.log('[auth] Starting OAuth with redirect_uri:', baseUrl, 'state:', state);
-
   sessionStorage.setItem('todoist_oauth_state', state);
 
   const params = new URLSearchParams({
@@ -345,9 +355,7 @@ function startOAuth() {
     redirect_uri: baseUrl
   });
 
-  const authUrl = `https://todoist.com/oauth/authorize?${params.toString()}`;
-  console.log('[auth] Redirecting to:', authUrl);
-  window.location.href = authUrl;
+  window.location.href = `https://todoist.com/oauth/authorize?${params.toString()}`;
 }
 
 async function handleOAuthRedirect() {
@@ -356,27 +364,17 @@ async function handleOAuthRedirect() {
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
 
-  console.log('[auth] Redirect params:', { code: !!code, state, error });
-
   if (error) {
-    authError.textContent = 'Authorization declined.';
-    console.warn('[auth] OAuth error from provider:', error);
+    authError.textContent = `OAuth error: ${error}`;
     return;
   }
-  if (!code) {
-    console.log('[auth] No code in URL; first load or already cleaned.');
-    return;
-  }
+  if (!code) return;
 
   const storedState = sessionStorage.getItem('todoist_oauth_state');
-  if (!storedState || storedState !== state) {
-    authError.textContent = 'State mismatch. Please try again.';
-    console.error('[auth] State mismatch. stored:', storedState, 'url:', state);
+  if (storedState !== state) {
+    authError.textContent = 'State mismatch. Try again.';
     return;
   }
-
-  authError.textContent = 'Exchanging code...';
-  console.log('[auth] Exchanging code for token via Netlify function.');
 
   try {
     const res = await fetch(OAUTH_FUNCTION_PATH, {
@@ -384,21 +382,14 @@ async function handleOAuthRedirect() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, redirect_uri: getBaseUrl() })
     });
-    const text = await res.text();
-    console.log('[auth] Token endpoint response:', res.status, text);
 
-    if (!res.ok) {
-      throw new Error(text || 'Token exchange failed');
-    }
-    const data = JSON.parse(text);
-    if (!data.access_token) {
-      throw new Error('No access token returned');
-    }
+    if (!res.ok) throw new Error(`Token exchange failed: ${res.status}`);
+    
+    const data = await res.json();
     saveToken(data.access_token);
-    window.history.replaceState({}, document.title, getBaseUrl());
+    window.history.replaceState({}, '', getBaseUrl());
     showApp();
   } catch (err) {
-    console.error('[auth] OAuth failed:', err);
     authError.textContent = 'OAuth failed: ' + err.message;
   }
 }
@@ -406,39 +397,14 @@ async function handleOAuthRedirect() {
 async function showApp() {
   authView.style.display = 'none';
   appView.style.display = 'block';
-  try {
-    await fetchData();
-  } catch (err) {
-    todayStatus.textContent = 'Failed to load tasks.';
-    allStatus.textContent = 'Failed to load tasks.';
-    console.error('[data] Initial load failed:', err);
-  }
+  await fetchData();
 }
 
 // ===== Event wiring =====
 
-btnAuth.addEventListener('click', () => startOAuth());
+btnAuth.addEventListener('click', startOAuth);
+btnRefresh.addEventListener('click', fetchData);
+btnMove.addEventListener('click', performMove);
 
-btnRefresh.addEventListener('click', () => {
-  console.log('[ui] Refresh clicked.');
-  fetchData().catch(err => {
-    console.error('[data] Refresh failed:', err);
-    moveStatus.textContent = 'Refresh failed.';
-  });
-});
-
-btnMove.addEventListener('click', () => {
-  console.log('[ui] Move clicked.');
-  performMove();
-});
-
-window.addEventListener('DOMContentLoaded', async () => {
-  console.log('[init] DOMContentLoaded, handling possible OAuth redirect.');
-  await handleOAuthRedirect();
-  if (hasToken()) {
-    console.log('[init] Token already present, showing app.');
-    showApp();
-  } else {
-    console.log('[init] No token yet, waiting for auth.');
-  }
-});
+window.addEventListener('DOMContentLoaded', handleOAuthRedirect);
+if (hasToken()) showApp();
