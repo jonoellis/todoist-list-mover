@@ -251,13 +251,13 @@ async function performMove() {
   moveStatus.textContent = 'Moving to project...';
 
   try {
-    // Use SYNC API v9 - this is the ONLY way to move tasks between projects
+    // SYNC API v9 - FIXED CORS headers
     const response = await fetch('https://api.todoist.com/sync/v9/sync', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Request-Id': crypto.randomUUID()
+        'Content-Type': 'application/json'
+        // NO X-Request-Id - this was causing CORS
       },
       body: JSON.stringify({
         sync_token: '*',
@@ -289,6 +289,7 @@ async function performMove() {
     btnMove.disabled = false;
   }
 }
+
 
 
 // ===== OAuth flow (UNCHANGED) =====
