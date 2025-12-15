@@ -7,6 +7,7 @@ let projectsById = {};
 
 let selectedLeftId = null;
 let selectedRightId = null;
+let taskSnapshotBefore = null; // New variable to store the "Before" state
 
 const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
@@ -20,6 +21,11 @@ const allStatus = document.getElementById('all-status');
 const moveStatus = document.getElementById('move-status');
 const btnMove = document.getElementById('btn-move');
 const btnRefresh = document.getElementById('btn-refresh');
+
+// --- NEW DEBUGGING UI ELEMENTS (ASSUMED) ---
+// You will need to add these buttons to your HTML:
+// <button id="btn-log-before">1. Log Before State</button>
+// <button id="btn-log-after">2. Log After & Compare</button>
 
 // ===== Helpers (UNCHANGED) =====
 
@@ -85,7 +91,8 @@ function updateMoveButtonState() {
   btnMove.disabled = !(selectedLeftId && selectedRightId);
 }
 
-// ===== Rendering (UNCHANGED) =====
+// ===== Rendering, Data Fetch, OAuth (UNCHANGED) =====
+// ... (omitted for brevity, assume renderLists and fetchData are unchanged)
 
 function renderLists() {
   console.log('[ui] Rendering lists. Today:', todayTasks.length, 'All:', allTasks.length);
@@ -153,8 +160,6 @@ function renderLists() {
     allListEl.appendChild(el);
   });
 }
-
-// ===== Data fetch (UNCHANGED) =====
 
 async function fetchData() {
   console.log('[data] Fetching projects and tasks...');
@@ -224,7 +229,110 @@ async function fetchData() {
   renderLists();
 }
 
-// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) =====
+// ===== NEW DEBUGGING FUNCTIONS =====
+
+/**
+ * Helper to log a task object clearly.
+ * @param {object} task The task object.
+ * @param {string} label Label for the console log.
+ */
+function dumpTaskToConsole(task, label) {
+    const relevantKeys = ['id', 'content', 'project_id', 'parent_id', 'indent', 'order', 'section_id'];
+    const logData = {};
+    relevantKeys.forEach(key => {
+        logData[key] = task[key];
+    });
+    console.log(`\n--- [DEBUG] ${label} Task ID ${task.id} ---`);
+    console.table(logData);
+    console.log(`--- FULL OBJECT ---`, task);
+    console.log(`\n----------------------------------------------------`);
+}
+
+/**
+ * Logs the "Before" state of the selected left task and stores it.
+ */
+async function logBefore() {
+    if (!selectedLeftId) {
+        alert("Please select a task on the left first.");
+        return;
+    }
+    const left = await callTodoist(`/tasks/${selectedLeftId}`, { method: 'GET' });
+    if (left) {
+        // Use JSON parsing to deep clone the object, preventing accidental modification
+        taskSnapshotBefore = JSON.parse(JSON.stringify(left)); 
+        dumpTaskToConsole(taskSnapshotBefore, "BEFORE STATE");
+        alert("BEFORE state logged to console. Now, go manually change the task in Todoist.");
+    }
+}
+
+/**
+ * Logs the "After" state of the selected left task and compares it to the "Before" state.
+ */
+async function logAfterAndCompare() {
+    if (!selectedLeftId) {
+        alert("Please select a task on the left first.");
+        return;
+    }
+    if (!taskSnapshotBefore) {
+        alert("Please hit the '1. Log Before State' button first.");
+        return;
+    }
+
+    const leftAfter = await callTodoist(`/tasks/${selectedLeftId}`, { method: 'GET' });
+    if (leftAfter) {
+        dumpTaskToConsole(leftAfter, "AFTER STATE (Manual Change)");
+        compareTasks(taskSnapshotBefore, leftAfter);
+    }
+}
+
+/**
+ * Compares two task objects and logs the differences.
+ * @param {object} before The task object before the change.
+ * @param {object} after The task object after the change.
+ */
+function compareTasks(before, after) {
+    const changes = {};
+    const keys = Object.keys(before);
+    let changedCount = 0;
+
+    console.log("\n--- [DEBUG] DIFFERENCES (Before vs. After) ---");
+    
+    keys.forEach(key => {
+        const valBefore = before[key];
+        const valAfter = after[key];
+        
+        // Simple comparison, ignoring deep object differences for now (like 'due')
+        if (key !== 'due' && JSON.stringify(valBefore) !== JSON.stringify(valAfter)) {
+            changes[key] = {
+                before: valBefore,
+                after: valAfter,
+                notes: `--- REQUIRED FIELD ---`
+            };
+            changedCount++;
+        } 
+        // Handle "due" object changes (simplified check)
+        else if (key === 'due' && JSON.stringify(valBefore) !== JSON.stringify(valAfter)) {
+             changes[key] = {
+                before: valBefore,
+                after: valAfter,
+                notes: `--- 'due' field changed (Check details above) ---`
+            };
+            changedCount++;
+        }
+    });
+
+    if (changedCount > 0) {
+        console.log(`\n✅ FOUND ${changedCount} REQUIRED CHANGE(S):`);
+        console.table(changes);
+        console.log("These are the minimum fields that MUST be included in the Step 2 API update!");
+    } else {
+        console.log("\n❌ NO SIGNIFICANT CHANGES DETECTED. The task structure may be the same.");
+    }
+    console.log("----------------------------------------------------");
+}
+
+
+// ===== WORKFLOW LOGIC (PREVIOUSLY ATTEMPTED FIXES REMOVED) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -265,15 +373,16 @@ async function performMove() {
 
     moveStatus.textContent = 'Step 2: Making subtask...';
 
-    // ** REVISED FIX APPLIED HERE: Include indent and order **
-    console.log('[move] STEP 2: Setting parent_id, indent: 2, and content for', left.id);
+    // STEP 2: Setting parent_id with previous attempts' best guess (indent/order)
+    // NOTE: This part remains based on the best guess until you provide the diff log
+    console.log('[move] STEP 2: Attempting to set parent_id, indent: 2, and content.');
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
         parent_id: right.id,
-        content: left.content, // Required field
-        indent: 2, // Explicitly set indent for subtask
-        order: 1 // Set order for positioning
+        content: left.content, 
+        indent: 2, 
+        order: 1 
       })
     });
 
@@ -315,13 +424,12 @@ async function performMove() {
       });
 
       // Set child parent to left task (REST API)
-      // Child tasks are level 3 (indent: 3) if their parent (left) is level 2 (indent: 2)
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
           parent_id: left.id,
-          content: child.content, // Required field
-          indent: 3, // Assuming this is the second level of subtask
+          content: child.content,
+          indent: 3, 
           order: 1
         })
       });
@@ -337,9 +445,8 @@ async function performMove() {
   }
 }
 
-
 // ===== OAuth flow (UNCHANGED) =====
-
+// ... (omitted for brevity, OAuth code remains the same)
 function startOAuth() {
   authError.textContent = '';
   const baseUrl = getBaseUrl();
@@ -419,6 +526,9 @@ async function showApp() {
   appView.style.display = 'block';
   try {
     await fetchData();
+    // Assuming you have buttons with these IDs:
+    document.getElementById('btn-log-before')?.addEventListener('click', logBefore);
+    document.getElementById('btn-log-after')?.addEventListener('click', logAfterAndCompare);
   } catch (err) {
     todayStatus.textContent = 'Failed to load tasks.';
     allStatus.textContent = 'Failed to load tasks.';
