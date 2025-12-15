@@ -85,7 +85,7 @@ function updateMoveButtonState() {
   btnMove.disabled = !(selectedLeftId && selectedRightId);
 }
 
-// ===== NEW EXPORT FUNCTION =====
+// ===== EXPORT FUNCTION (UNCHANGED) =====
 
 function exportAndDownloadData(allTasksData, allProjectsData) {
   const data = {
@@ -133,6 +133,7 @@ function exportAndDownloadData(allTasksData, allProjectsData) {
   
   console.log(`[data] Downloaded full state to ${a.download}`);
 }
+
 
 // ===== Rendering (UNCHANGED) =====
 
@@ -203,7 +204,7 @@ function renderLists() {
   });
 }
 
-// ===== Data fetch (MODIFIED) =====
+// ===== Data fetch (UNCHANGED) =====
 
 async function fetchData() {
   console.log('[data] Fetching projects and tasks...');
@@ -267,19 +268,15 @@ async function fetchData() {
   console.log('[data] Today+subtasks count:', todayTasks.length);
   console.log('[data] All parent tasks count:', allTasks.length);
 
-  // NO CONSOLE EXPORT HERE: The full export is now triggered by the refresh button click.
-  // The initial load will just load the data without prompting a download.
-
   selectedLeftId = null;
   selectedRightId = null;
   updateMoveButtonState();
   renderLists();
   
-  // Return the raw data so it can be used for the external export
   return { tasks, projects };
 }
 
-// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) (UNCHANGED) =====
+// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) (MODIFIED STEP 2) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -320,15 +317,14 @@ async function performMove() {
 
     moveStatus.textContent = 'Step 2: Making subtask...';
 
-    // ** REVISED FIX APPLIED HERE: Include indent and order **
-    console.log('[move] STEP 2: Setting parent_id, indent: 2, and content for', left.id);
+    // ** REVISED FIX APPLIED HERE: Only set parent_id and order, omitting indent. **
+    console.log('[move] STEP 2: Setting parent_id and order for', left.id);
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
-        parent_id: right.id,
+        parent_id: right.id, // Set the ID of the parent task
         content: left.content, // Required field
-        indent: 2, // Explicitly set indent for subtask
-        order: 1 // Set order for positioning
+        order: 2 // Set order as observed in your successful test log
       })
     });
 
@@ -370,14 +366,12 @@ async function performMove() {
       });
 
       // Set child parent to left task (REST API)
-      // Child tasks are level 3 (indent: 3) if their parent (left) is level 2 (indent: 2)
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
           parent_id: left.id,
           content: child.content, // Required field
-          indent: 3, // Assuming this is the second level of subtask
-          order: 1
+          order: 1 // Keep order simple for children
         })
       });
     }
@@ -473,7 +467,6 @@ async function showApp() {
   authView.style.display = 'none';
   appView.style.display = 'block';
   try {
-    // Note: fetchData is called, but its return value is ignored here
     await fetchData(); 
   } catch (err) {
     todayStatus.textContent = 'Failed to load tasks.';
@@ -482,7 +475,7 @@ async function showApp() {
   }
 }
 
-// ===== Event wiring (MODIFIED) =====
+// ===== Event wiring (UNCHANGED) =====
 
 btnAuth.addEventListener('click', () => startOAuth());
 
