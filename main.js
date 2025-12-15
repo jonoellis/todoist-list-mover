@@ -276,7 +276,7 @@ async function fetchData() {
   return { tasks, projects };
 }
 
-// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED - Sync API Consolidation) =====
+// ===== CLONE-AND-DELETE IMPLEMENTATION (MODIFIED) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -288,86 +288,46 @@ async function performMove() {
     moveStatus.textContent = 'Invalid selection';
     return;
   }
+  
+  // NOTE: This approach assumes the 'left' task does NOT have its own subtasks.
 
   btnMove.disabled = true;
-  moveStatus.textContent = 'Moving task and setting parent...';
+  moveStatus.textContent = 'Cloning task as subtask (Step 1 of 2)...';
 
   try {
     // ---------------------------------------------------------------------
-    // ** CONSOLIDATED STEP: Use Sync API 'item_move' to set project_id AND parent_id **
-    // ---------------------------------------------------------------------
-    console.log('[move] CONSOLIDATED STEP: Moving task to project', right.project_id, 'and setting parent to', right.id);
-    await fetch('https://api.todoist.com/sync/v9/sync', {
+    // STEP 1: CLONE/CREATE THE NEW SUBTASK
+    // Build the payload for the new subtask, copying all relevant fields
+    const newTaskPayload = {
+      content: left.content,
+      description: left.description,
+      project_id: right.project_id, // New project ID from the right parent task
+      parent_id: right.id,          // NEW PARENT ID
+      priority: left.priority,
+      labels: left.labels,
+      // Only include 'due' if it exists on the original task
+      ...(left.due && { due_string: left.due.string }) // Re-uses the due string
+    };
+
+    console.log('[move] STEP 1: Creating new subtask with payload:', newTaskPayload);
+    // Use the REST API /tasks endpoint to create the new task
+    await callTodoist('/tasks', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        sync_token: '*',
-        resource_types: '["projects","items"]',
-        commands: [{
-          type: 'item_move',
-          uuid: crypto.randomUUID(),
-          args: {
-            id: parseInt(left.id),
-            project_id: parseInt(right.project_id),
-            parent_id: parseInt(right.id) // <--- FIX: Use Sync API to set parent_id
-          }
-        }]
-      })
+      body: JSON.stringify(newTaskPayload)
+    });
+    // ---------------------------------------------------------------------
+    
+    moveStatus.textContent = 'Deleting original task (Step 2 of 2)...';
+
+    // ---------------------------------------------------------------------
+    // STEP 2: DELETE THE ORIGINAL TASK
+    console.log('[move] STEP 2: Deleting original task', left.id);
+    await callTodoist(`/tasks/${left.id}`, {
+      method: 'DELETE'
     });
     // ---------------------------------------------------------------------
 
-    // Find and move children (if any)
-    const allTasksFlat = [...todayTasks, ...allTasks];
-    const byId = {};
-    allTasksFlat.forEach(t => byId[t.id] = t);
-
-    const children = allTasksFlat.filter(task => {
-      let current = task;
-      while (current.parent_id) {
-        if (current.parent_id === left.id) return true;
-        current = byId[current.parent_id];
-        if (!current) break;
-      }
-      return false;
-    });
-
-    for (const child of children) {
-      // Move child to same project (SYNC API - same as before)
-      await fetch('https://api.todoist.com/sync/v9/sync', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          sync_token: '*',
-          resource_types: '["projects","items"]',
-          commands: [{
-            type: 'item_move',
-            uuid: crypto.randomUUID(),
-            args: {
-              id: parseInt(child.id),
-              project_id: parseInt(right.project_id)
-            }
-          }]
-        })
-      });
-
-      // Set child parent to left task (REST API - still the simplified update)
-      await callTodoist(`/tasks/${child.id}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          parent_id: left.id,
-          content: child.content, // Required field
-          order: 1 
-        })
-      });
-    }
-
-    moveStatus.textContent = '✅ Moved as subtask! Refreshing...';
+    moveStatus.textContent = '✅ Cloned and Deleted! Refreshing...';
     setTimeout(fetchData, 1500);
   } catch (err) {
     console.error('[move] Error:', err);
