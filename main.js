@@ -265,15 +265,13 @@ async function performMove() {
 
     moveStatus.textContent = 'Step 2: Making subtask...';
 
-    // ** FIX APPLIED HERE **
-    // The Todoist REST API v2 update endpoint requires more than just parent_id
-    // to be in the payload. We re-send the project_id to satisfy this requirement.
-    console.log('[move] STEP 2: Setting parent_id to', right.id, 'and confirming project_id');
+    // ** FIX APPLIED HERE: Use task content along with parent_id **
+    console.log('[move] STEP 2: Setting parent_id to', right.id, 'and confirming content');
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
         parent_id: right.id,
-        project_id: right.project_id // REQUIRED by REST API to make a valid update request
+        content: left.content // Use content to satisfy REST API update requirement
       })
     });
 
@@ -293,7 +291,7 @@ async function performMove() {
     });
 
     for (const child of children) {
-      // Move child to same project
+      // Move child to same project (SYNC API)
       await fetch('https://api.todoist.com/sync/v9/sync', {
         method: 'POST',
         headers: {
@@ -314,12 +312,12 @@ async function performMove() {
         })
       });
 
-      // Set child parent to left task
+      // Set child parent to left task (REST API)
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
           parent_id: left.id,
-          project_id: right.project_id // Also need to re-send project_id for children!
+          content: child.content // Use content to satisfy REST API update requirement
         })
       });
     }
@@ -333,6 +331,7 @@ async function performMove() {
     btnMove.disabled = false;
   }
 }
+
 
 // ===== OAuth flow (UNCHANGED) =====
 
