@@ -265,13 +265,15 @@ async function performMove() {
 
     moveStatus.textContent = 'Step 2: Making subtask...';
 
-    // ** FIX APPLIED HERE: Use task content along with parent_id **
-    console.log('[move] STEP 2: Setting parent_id to', right.id, 'and confirming content');
+    // ** REVISED FIX APPLIED HERE: Include indent and order **
+    console.log('[move] STEP 2: Setting parent_id, indent: 2, and content for', left.id);
     await callTodoist(`/tasks/${left.id}`, {
       method: 'POST',
       body: JSON.stringify({
         parent_id: right.id,
-        content: left.content // Use content to satisfy REST API update requirement
+        content: left.content, // Required field
+        indent: 2, // Explicitly set indent for subtask
+        order: 1 // Set order for positioning
       })
     });
 
@@ -313,11 +315,14 @@ async function performMove() {
       });
 
       // Set child parent to left task (REST API)
+      // Child tasks are level 3 (indent: 3) if their parent (left) is level 2 (indent: 2)
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
           parent_id: left.id,
-          content: child.content // Use content to satisfy REST API update requirement
+          content: child.content, // Required field
+          indent: 3, // Assuming this is the second level of subtask
+          order: 1
         })
       });
     }
