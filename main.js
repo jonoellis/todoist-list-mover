@@ -85,54 +85,7 @@ function updateMoveButtonState() {
   btnMove.disabled = !(selectedLeftId && selectedRightId);
 }
 
-// ===== EXPORT FUNCTION (UNCHANGED) =====
-
-function exportAndDownloadData(allTasksData, allProjectsData) {
-  const data = {
-    exportTimestamp: new Date().toISOString(),
-    // Log the current global state variables
-    currentAppState: {
-        todayTasks: todayTasks,
-        allTasks: allTasks,
-        projectsById: projectsById,
-        selectedLeftId: selectedLeftId,
-        selectedRightId: selectedRightId
-    },
-    // Log the raw data fetched from the Todoist API
-    apiData: {
-        tasks: allTasksData,
-        projects: allProjectsData
-    }
-  };
-  
-  // Convert the object to a formatted JSON string
-  const jsonString = JSON.stringify(data, null, 2);
-  
-  // Create a Blob containing the JSON data
-  const blob = new Blob([jsonString], { type: 'application/json' });
-  
-  // Create a URL for the blob
-  const url = URL.createObjectURL(blob);
-  
-  // Create a temporary anchor element for the download
-  const a = document.createElement('a');
-  a.href = url;
-  
-  // Create a timestamped filename
-  const now = new Date();
-  const datetime = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  a.download = `todoist-log-${datetime}.json`;
-  
-  // Programmatically click the link to trigger the download
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  
-  // Clean up the object URL
-  URL.revokeObjectURL(url);
-  
-  console.log(`[data] Downloaded full state to ${a.download}`);
-}
+// ===== EXPORT FUNCTION REMOVED: Download logic is gone =====
 
 
 // ===== Rendering (UNCHANGED) =====
@@ -276,7 +229,7 @@ async function fetchData() {
   return { tasks, projects };
 }
 
-// ===== CLONE-AND-DELETE IMPLEMENTATION (MODIFIED) =====
+// ===== CLONE-AND-DELETE IMPLEMENTATION (UNCHANGED from previous step) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -426,22 +379,19 @@ async function showApp() {
   }
 }
 
-// ===== Event wiring (UNCHANGED) =====
+// ===== Event wiring (MODIFIED - Refresh button now only calls fetchData) =====
 
 btnAuth.addEventListener('click', () => startOAuth());
 
 btnRefresh.addEventListener('click', async () => {
-  console.log('[ui] Refresh clicked, loading new data and preparing export.');
+  console.log('[ui] Refresh clicked, loading new data.');
   try {
-    // 1. Fetch data
-    const { tasks, projects } = await fetchData();
-    
-    // 2. Export the newly fetched data
-    exportAndDownloadData(tasks, projects);
+    // Refresh button now only fetches and renders data
+    await fetchData(); 
     
   } catch (err) {
-    console.error('[data] Refresh/Export failed:', err);
-    moveStatus.textContent = 'Refresh or Export failed: ' + err.message;
+    console.error('[data] Refresh failed:', err);
+    moveStatus.textContent = 'Refresh failed: ' + err.message;
   }
 });
 
