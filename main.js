@@ -85,6 +85,55 @@ function updateMoveButtonState() {
   btnMove.disabled = !(selectedLeftId && selectedRightId);
 }
 
+// ===== NEW EXPORT FUNCTION =====
+
+function exportAndDownloadData(allTasksData, allProjectsData) {
+  const data = {
+    exportTimestamp: new Date().toISOString(),
+    // Log the current global state variables
+    currentAppState: {
+        todayTasks: todayTasks,
+        allTasks: allTasks,
+        projectsById: projectsById,
+        selectedLeftId: selectedLeftId,
+        selectedRightId: selectedRightId
+    },
+    // Log the raw data fetched from the Todoist API
+    apiData: {
+        tasks: allTasksData,
+        projects: allProjectsData
+    }
+  };
+  
+  // Convert the object to a formatted JSON string
+  const jsonString = JSON.stringify(data, null, 2);
+  
+  // Create a Blob containing the JSON data
+  const blob = new Blob([jsonString], { type: 'application/json' });
+  
+  // Create a URL for the blob
+  const url = URL.createObjectURL(blob);
+  
+  // Create a temporary anchor element for the download
+  const a = document.createElement('a');
+  a.href = url;
+  
+  // Create a timestamped filename
+  const now = new Date();
+  const datetime = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.download = `todoist-log-${datetime}.json`;
+  
+  // Programmatically click the link to trigger the download
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  
+  // Clean up the object URL
+  URL.revokeObjectURL(url);
+  
+  console.log(`[data] Downloaded full state to ${a.download}`);
+}
+
 // ===== Rendering (UNCHANGED) =====
 
 function renderLists() {
@@ -218,22 +267,16 @@ async function fetchData() {
   console.log('[data] Today+subtasks count:', todayTasks.length);
   console.log('[data] All parent tasks count:', allTasks.length);
 
-  // =================================================================
-  // === DEBUGGING EXPORT ADDED HERE ===
-  // Export all relevant data to the console for debugging/comparison
-  console.groupCollapsed('--- FULL APP STATE EXPORT ---');
-  console.log('All Todoist Tasks (tasks):', tasks);
-  console.log('All Projects (projects):', projects);
-  console.log('Projects Mapped by ID (projectsById):', projectsById);
-  console.log('Filtered Today Tasks with Subtasks (todayTasks):', todayTasks);
-  console.log('Filtered All Parent Tasks (allTasks):', allTasks);
-  console.groupEnd();
-  // =================================================================
+  // NO CONSOLE EXPORT HERE: The full export is now triggered by the refresh button click.
+  // The initial load will just load the data without prompting a download.
 
   selectedLeftId = null;
   selectedRightId = null;
   updateMoveButtonState();
   renderLists();
+  
+  // Return the raw data so it can be used for the external export
+  return { tasks, projects };
 }
 
 // ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) (UNCHANGED) =====
@@ -430,7 +473,8 @@ async function showApp() {
   authView.style.display = 'none';
   appView.style.display = 'block';
   try {
-    await fetchData();
+    // Note: fetchData is called, but its return value is ignored here
+    await fetchData(); 
   } catch (err) {
     todayStatus.textContent = 'Failed to load tasks.';
     allStatus.textContent = 'Failed to load tasks.';
@@ -438,16 +482,23 @@ async function showApp() {
   }
 }
 
-// ===== Event wiring (UNCHANGED) =====
+// ===== Event wiring (MODIFIED) =====
 
 btnAuth.addEventListener('click', () => startOAuth());
 
-btnRefresh.addEventListener('click', () => {
-  console.log('[ui] Refresh clicked.');
-  fetchData().catch(err => {
-    console.error('[data] Refresh failed:', err);
-    moveStatus.textContent = 'Refresh failed.';
-  });
+btnRefresh.addEventListener('click', async () => {
+  console.log('[ui] Refresh clicked, loading new data and preparing export.');
+  try {
+    // 1. Fetch data
+    const { tasks, projects } = await fetchData();
+    
+    // 2. Export the newly fetched data
+    exportAndDownloadData(tasks, projects);
+    
+  } catch (err) {
+    console.error('[data] Refresh/Export failed:', err);
+    moveStatus.textContent = 'Refresh or Export failed: ' + err.message;
+  }
 });
 
 btnMove.addEventListener('click', () => {
