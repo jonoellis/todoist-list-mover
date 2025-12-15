@@ -154,7 +154,7 @@ function renderLists() {
   });
 }
 
-// ===== Data fetch (UNCHANGED) =====
+// ===== Data fetch (MODIFIED) =====
 
 async function fetchData() {
   console.log('[data] Fetching projects and tasks...');
@@ -218,13 +218,25 @@ async function fetchData() {
   console.log('[data] Today+subtasks count:', todayTasks.length);
   console.log('[data] All parent tasks count:', allTasks.length);
 
+  // =================================================================
+  // === DEBUGGING EXPORT ADDED HERE ===
+  // Export all relevant data to the console for debugging/comparison
+  console.groupCollapsed('--- FULL APP STATE EXPORT ---');
+  console.log('All Todoist Tasks (tasks):', tasks);
+  console.log('All Projects (projects):', projects);
+  console.log('Projects Mapped by ID (projectsById):', projectsById);
+  console.log('Filtered Today Tasks with Subtasks (todayTasks):', todayTasks);
+  console.log('Filtered All Parent Tasks (allTasks):', allTasks);
+  console.groupEnd();
+  // =================================================================
+
   selectedLeftId = null;
   selectedRightId = null;
   updateMoveButtonState();
   renderLists();
 }
 
-// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) =====
+// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) (UNCHANGED) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
