@@ -276,7 +276,7 @@ async function fetchData() {
   return { tasks, projects };
 }
 
-// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED) (MODIFIED STEP 2) =====
+// ===== SIMPLIFIED: ONLY PROJECT REASSIGNMENT (FIXED - Sync API Consolidation) =====
 
 async function performMove() {
   if (!selectedLeftId || !selectedRightId) return;
@@ -290,11 +290,13 @@ async function performMove() {
   }
 
   btnMove.disabled = true;
-  moveStatus.textContent = 'Step 1: Moving to project...';
+  moveStatus.textContent = 'Moving task and setting parent...';
 
   try {
-    // STEP 1: Move left task to right's project using SYNC API
-    console.log('[move] STEP 1: Moving task to project', right.project_id);
+    // ---------------------------------------------------------------------
+    // ** CONSOLIDATED STEP: Use Sync API 'item_move' to set project_id AND parent_id **
+    // ---------------------------------------------------------------------
+    console.log('[move] CONSOLIDATED STEP: Moving task to project', right.project_id, 'and setting parent to', right.id);
     await fetch('https://api.todoist.com/sync/v9/sync', {
       method: 'POST',
       headers: {
@@ -309,24 +311,13 @@ async function performMove() {
           uuid: crypto.randomUUID(),
           args: {
             id: parseInt(left.id),
-            project_id: parseInt(right.project_id)
+            project_id: parseInt(right.project_id),
+            parent_id: parseInt(right.id) // <--- FIX: Use Sync API to set parent_id
           }
         }]
       })
     });
-
-    moveStatus.textContent = 'Step 2: Making subtask...';
-
-    // ** REVISED FIX APPLIED HERE: Only set parent_id and order, omitting indent. **
-    console.log('[move] STEP 2: Setting parent_id and order for', left.id);
-    await callTodoist(`/tasks/${left.id}`, {
-      method: 'POST',
-      body: JSON.stringify({
-        parent_id: right.id, // Set the ID of the parent task
-        content: left.content, // Required field
-        order: 2 // Set order as observed in your successful test log
-      })
-    });
+    // ---------------------------------------------------------------------
 
     // Find and move children (if any)
     const allTasksFlat = [...todayTasks, ...allTasks];
@@ -344,7 +335,7 @@ async function performMove() {
     });
 
     for (const child of children) {
-      // Move child to same project (SYNC API)
+      // Move child to same project (SYNC API - same as before)
       await fetch('https://api.todoist.com/sync/v9/sync', {
         method: 'POST',
         headers: {
@@ -365,13 +356,13 @@ async function performMove() {
         })
       });
 
-      // Set child parent to left task (REST API)
+      // Set child parent to left task (REST API - still the simplified update)
       await callTodoist(`/tasks/${child.id}`, {
         method: 'POST',
         body: JSON.stringify({
           parent_id: left.id,
           content: child.content, // Required field
-          order: 1 // Keep order simple for children
+          order: 1 
         })
       });
     }
